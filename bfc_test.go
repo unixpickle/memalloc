@@ -83,6 +83,14 @@ func BenchmarkBFC(b *testing.B) {
 	addrs := make([]int, len(sizes))
 	allocator := NewBFC(1<<20, 32)
 
+	// Start with a fragmented allocator.
+	for i, size := range sizes {
+		addrs[i] = mustAlloc(allocator.Alloc(size))
+	}
+	for _, j := range indices[:len(indices)/2] {
+		allocator.Free(addrs[j])
+	}
+
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		for i, size := range sizes {
