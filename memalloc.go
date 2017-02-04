@@ -1,6 +1,8 @@
 // Package memalloc provides a generic memory allocator.
 package memalloc
 
+import "unsafe"
+
 // An Allocator allocates ranges of integers.
 //
 // An Allocator controls an implicit buffer that starts at
@@ -10,4 +12,33 @@ package memalloc
 type Allocator interface {
 	Alloc(size int) (addr int, err error)
 	Free(addr int)
+}
+
+// MemAllocator wraps an Allocator and uses it to create
+// unsafe.Pointers.
+type MemAllocator struct {
+	Start     unsafe.Pointer
+	Size      int
+	Allocator Allocator
+}
+
+// Alloc allocates a pointer.
+func (m *MemAllocator) Alloc(size int) (unsafe.Pointer, error) {
+	addr, err := m.Allocator.Alloc(size)
+	if err != nil {
+		return nil, err
+	}
+	return unsafe.Pointer(uintptr(m.Start) + uintptr(addr)), nil
+}
+
+// Free frees a pointer.
+func (m *MemAllocator) Free(ptr unsafe.Pointer) {
+	if uintptr(ptr) < uintptr(m.Start) {
+		panic("pointer out of bounds")
+	}
+	if uintptr(ptr) >= uintptr(m.Start)+uintptr(m.Size) {
+		panic("pointer out of bounds")
+	}
+	idx := int(uintptr(ptr) - uintptr(m.Start))
+	m.Allocator.Free(idx)
 }

@@ -68,7 +68,7 @@ func TestBFCRandom(t *testing.T) {
 	for _, x := range used {
 		allocator.Free(x.start)
 	}
-	ptr := mustAlloc(allocator.Alloc(1<<20))
+	ptr := mustAlloc(allocator.Alloc(1 << 20))
 	if ptr != 0 {
 		t.Errorf("expected 0 but got %d", ptr)
 	}
