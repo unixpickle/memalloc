@@ -2,6 +2,8 @@ package memalloc
 
 import (
 	"errors"
+
+	"github.com/unixpickle/splaytree"
 )
 
 // bfc is a best-fit with coalescing allocator.
@@ -10,10 +12,12 @@ import (
 // During frees, neighboring free chunks are re-joined to
 // prevent memory fragmentation.
 type bfc struct {
-	size  int
-	align int
-	free  []freeChunk
-	sizes map[int]int
+	size          int
+	align         int
+	free          *splaytree.Tree
+	usedSizes     map[int]int
+	freeToSize    map[int]int
+	freeEndToSize map[int]int
 }
 
 // NewBFC creates an Allocator that uses a best-fit with
@@ -22,12 +26,19 @@ type bfc struct {
 // The resulting allocator will always produce buffers
 // aligned to the given alignment.
 func NewBFC(size, align int) Allocator {
-	return &bfc{
+	b := &bfc{
 		align: align,
 		size:  downAlign(size, align),
-		free:  []freeChunk{{0, size}},
-		sizes: map[int]int{},
+		free:  &splaytree.Tree{},
+
+		usedSizes:     map[int]int{},
+		freeToSize:    map[int]int{},
+		freeEndToSize: map[int]int{},
 	}
+	b.freeToSize[0] = b.size
+	b.freeEndToSize[b.size] = b.size
+	b.free.Insert(&freeNode{start: 0, size: b.size})
+	return b
 }
 
 func (b *bfc) Alloc(size int) (addr int, err error) {
@@ -35,61 +46,95 @@ func (b *bfc) Alloc(size int) (addr int, err error) {
 		size = 1
 	}
 	size = upAlign(size, b.align)
-	var smallestFit *freeChunk
-	for i, f := range b.free {
-		if f.size >= size {
-			if smallestFit == nil || smallestFit.size > f.size {
-				smallestFit = &b.free[i]
-			}
-		}
-	}
-	if smallestFit == nil {
+	fit := b.smallestFit(b.free.Root, size)
+	if fit == nil {
 		return 0, errors.New("alloc: out of memory")
 	}
-	res := smallestFit.start
-	remaining := smallestFit.size - size
+	b.free.Delete(fit)
+	delete(b.freeToSize, fit.start)
+	delete(b.freeEndToSize, fit.start+fit.size)
+
+	res := fit.start
+	remaining := fit.size - size
 	if remaining > 0 {
-		smallestFit.size = remaining
-		smallestFit.start += size
-	} else {
-		*smallestFit = b.free[len(b.free)-1]
-		b.free = b.free[:len(b.free)-1]
+		fit.size = remaining
+		fit.start += size
+		b.free.Insert(fit)
+		b.freeToSize[fit.start] = remaining
+		b.freeEndToSize[fit.start+remaining] = remaining
 	}
-	b.sizes[res] = size
+	b.usedSizes[res] = size
 	return res, nil
 }
 
 func (b *bfc) Free(addr int) {
-	size := b.sizes[addr]
-	delete(b.sizes, addr)
+	size := b.usedSizes[addr]
+	delete(b.usedSizes, addr)
 
-	var lastFree, nextFree *freeChunk
-	for i, f := range b.free {
-		if f.start == addr+size {
-			nextFree = &b.free[i]
-		} else if f.start+f.size == addr {
-			lastFree = &b.free[i]
-		}
+	var lastFree, nextFree *freeNode
+	if lastSize, ok := b.freeEndToSize[addr]; ok {
+		lastFree = &freeNode{start: addr - lastSize, size: lastSize}
+		b.free.Delete(lastFree)
+		delete(b.freeEndToSize, addr)
+		delete(b.freeToSize, lastFree.start)
+	}
+	if nextSize, ok := b.freeToSize[addr+size]; ok {
+		nextFree = &freeNode{start: addr + size, size: nextSize}
+		b.free.Delete(nextFree)
+		delete(b.freeEndToSize, nextFree.start+nextFree.size)
+		delete(b.freeToSize, nextFree.start)
 	}
 
-	if lastFree == nil && nextFree == nil {
-		b.free = append(b.free, freeChunk{start: addr, size: size})
-	} else if lastFree == nil {
-		nextFree.start = addr
-		nextFree.size += size
+	if lastFree == nil {
+		lastFree = &freeNode{start: addr, size: size}
 	} else {
 		lastFree.size += size
-		if nextFree != nil {
-			lastFree.size += nextFree.size
-			*nextFree = b.free[len(b.free)-1]
-			b.free = b.free[:len(b.free)-1]
+	}
+	if nextFree != nil {
+		lastFree.size += nextFree.size
+	}
+
+	b.freeToSize[lastFree.start] = lastFree.size
+	b.freeEndToSize[lastFree.start+lastFree.size] = lastFree.size
+	b.free.Insert(lastFree)
+}
+
+func (b *bfc) smallestFit(n *splaytree.Node, size int) *freeNode {
+	if n == nil {
+		return nil
+	}
+	val := n.Value.(*freeNode)
+	if val.size == size {
+		return val
+	}
+	if val.size > size {
+		if res := b.smallestFit(n.Left, size); res != nil {
+			return res
 		}
+		return val
+	} else {
+		return b.smallestFit(n.Right, size)
 	}
 }
 
-type freeChunk struct {
+type freeNode struct {
 	start int
 	size  int
+}
+
+func (f *freeNode) Compare(v2 splaytree.Value) int {
+	f2 := v2.(*freeNode)
+	if f.size < f2.size {
+		return -1
+	} else if f.size > f2.size {
+		return 1
+	} else if f.start < f2.start {
+		return -1
+	} else if f.start > f2.start {
+		return 1
+	} else {
+		return 0
+	}
 }
 
 func downAlign(size, align int) int {
