@@ -22,6 +22,12 @@ type MemAllocator struct {
 	Allocator Allocator
 }
 
+// Contains checks if a pointer is within the allocator's
+// controlled memory region.
+func (m *MemAllocator) Contains(p unsafe.Pointer) bool {
+	return uintptr(p) < uintptr(m.Start)+uintptr(m.Size) && uintptr(p) >= uintptr(m.Start)
+}
+
 // Alloc allocates a pointer.
 func (m *MemAllocator) Alloc(size int) (unsafe.Pointer, error) {
 	addr, err := m.Allocator.Alloc(size)
@@ -33,10 +39,7 @@ func (m *MemAllocator) Alloc(size int) (unsafe.Pointer, error) {
 
 // Free frees a pointer.
 func (m *MemAllocator) Free(ptr unsafe.Pointer) {
-	if uintptr(ptr) < uintptr(m.Start) {
-		panic("pointer out of bounds")
-	}
-	if uintptr(ptr) >= uintptr(m.Start)+uintptr(m.Size) {
+	if !m.Contains(ptr) {
 		panic("pointer out of bounds")
 	}
 	idx := int(uintptr(ptr) - uintptr(m.Start))
