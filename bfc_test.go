@@ -74,6 +74,26 @@ func TestBFCRandom(t *testing.T) {
 	}
 }
 
+func BenchmarkBFC(b *testing.B) {
+	sizes := make([]int, 10000)
+	for i := range sizes {
+		sizes[i] = rand.Intn(100)
+	}
+	indices := rand.Perm(len(sizes))
+	addrs := make([]int, len(sizes))
+	allocator := NewBFC(1<<20, 32)
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		for i, size := range sizes {
+			addrs[i] = mustAlloc(allocator.Alloc(size))
+		}
+		for _, j := range indices {
+			allocator.Free(addrs[j])
+		}
+	}
+}
+
 func mustAlloc(addr int, err error) int {
 	if err != nil {
 		panic(err)

@@ -12,7 +12,7 @@ import (
 type bfc struct {
 	size  int
 	align int
-	free  []*freeChunk
+	free  []freeChunk
 	sizes map[int]int
 }
 
@@ -25,7 +25,7 @@ func NewBFC(size, align int) Allocator {
 	return &bfc{
 		align: align,
 		size:  downAlign(size, align),
-		free:  []*freeChunk{{0, size}},
+		free:  []freeChunk{{0, size}},
 		sizes: map[int]int{},
 	}
 }
@@ -36,12 +36,10 @@ func (b *bfc) Alloc(size int) (addr int, err error) {
 	}
 	size = upAlign(size, b.align)
 	var smallestFit *freeChunk
-	var fitIdx int
 	for i, f := range b.free {
 		if f.size >= size {
 			if smallestFit == nil || smallestFit.size > f.size {
-				fitIdx = i
-				smallestFit = f
+				smallestFit = &b.free[i]
 			}
 		}
 	}
@@ -54,7 +52,7 @@ func (b *bfc) Alloc(size int) (addr int, err error) {
 		smallestFit.size = remaining
 		smallestFit.start += size
 	} else {
-		b.free[fitIdx] = b.free[len(b.free)-1]
+		*smallestFit = b.free[len(b.free)-1]
 		b.free = b.free[:len(b.free)-1]
 	}
 	b.sizes[res] = size
@@ -66,18 +64,16 @@ func (b *bfc) Free(addr int) {
 	delete(b.sizes, addr)
 
 	var lastFree, nextFree *freeChunk
-	var nextFreeIdx int
 	for i, f := range b.free {
 		if f.start == addr+size {
-			nextFree = f
-			nextFreeIdx = i
+			nextFree = &b.free[i]
 		} else if f.start+f.size == addr {
-			lastFree = f
+			lastFree = &b.free[i]
 		}
 	}
 
 	if lastFree == nil && nextFree == nil {
-		b.free = append(b.free, &freeChunk{start: addr, size: size})
+		b.free = append(b.free, freeChunk{start: addr, size: size})
 	} else if lastFree == nil {
 		nextFree.start = addr
 		nextFree.size += size
@@ -85,7 +81,7 @@ func (b *bfc) Free(addr int) {
 		lastFree.size += size
 		if nextFree != nil {
 			lastFree.size += nextFree.size
-			b.free[nextFreeIdx] = b.free[len(b.free)-1]
+			*nextFree = b.free[len(b.free)-1]
 			b.free = b.free[:len(b.free)-1]
 		}
 	}
