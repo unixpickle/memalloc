@@ -14,7 +14,7 @@ import (
 type bfc struct {
 	size          int
 	align         int
-	free          *splaytree.Tree
+	free          *splaytree.Tree[*freeNode]
 	usedSizes     map[int]int
 	freeToSize    map[int]int
 	freeEndToSize map[int]int
@@ -29,7 +29,7 @@ func NewBFC(size, align int) Allocator {
 	b := &bfc{
 		align: align,
 		size:  downAlign(size, align),
-		free:  &splaytree.Tree{},
+		free:  &splaytree.Tree[*freeNode]{},
 
 		usedSizes:     map[int]int{},
 		freeToSize:    map[int]int{},
@@ -99,11 +99,11 @@ func (b *bfc) Free(addr int) {
 	b.free.Insert(lastFree)
 }
 
-func (b *bfc) smallestFit(n *splaytree.Node, size int) *freeNode {
+func (b *bfc) smallestFit(n *splaytree.Node[*freeNode], size int) *freeNode {
 	if n == nil {
 		return nil
 	}
-	val := n.Value.(*freeNode)
+	val := n.Value
 	if val.size == size {
 		return val
 	}
@@ -122,8 +122,8 @@ type freeNode struct {
 	size  int
 }
 
-func (f *freeNode) Compare(v2 splaytree.Value) int {
-	f2 := v2.(*freeNode)
+func (f *freeNode) Compare(v2 *freeNode) int {
+	f2 := v2
 	if f.size < f2.size {
 		return -1
 	} else if f.size > f2.size {
